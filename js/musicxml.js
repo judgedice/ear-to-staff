@@ -20,7 +20,9 @@ export function toMusicXML(measures, o) {
   lines.push('<score-partwise version="4.0">');
   lines.push(`  <work><work-title>${esc(o.title || 'Transcription')}</work-title></work>`);
   lines.push('  <identification><encoding><software>Ear to Staff</software></encoding></identification>');
-  lines.push('  <part-list><score-part id="P1"><part-name>Melody</part-name></score-part></part-list>');
+  const inst = o.instrument && o.instrument.semis ? o.instrument : null;
+  const octaveShift = o.octaveShift || 0;
+  lines.push(`  <part-list><score-part id="P1"><part-name>${esc(inst ? inst.label : 'Melody')}</part-name></score-part></part-list>`);
   lines.push('  <part id="P1">');
 
   measures.forEach((els, i) => {
@@ -31,6 +33,14 @@ export function toMusicXML(measures, o) {
       lines.push(`        <key><fifths>${o.key.fifths}</fifths><mode>${o.key.mode}</mode></key>`);
       lines.push(`        <time><beats>${o.timeSig.beats}</beats><beat-type>${o.timeSig.beatValue}</beat-type></time>`);
       lines.push(`        <clef><sign>${clefSign}</sign><line>${clefLine}</line></clef>`);
+      if (inst || octaveShift) {
+        // <transpose> maps written to sounding: sounding = written - semis.
+        const total = (inst ? inst.semis : 0) + octaveShift * 12;
+        const diatonicTotal = (inst ? inst.diatonic : 0) + octaveShift * 7;
+        const octaves = Math.floor(total / 12);
+        lines.push(`        <transpose><diatonic>${-(diatonicTotal - octaves * 7)}</diatonic><chromatic>${-(total - octaves * 12)}</chromatic>` +
+          (octaves ? `<octave-change>${-octaves}</octave-change>` : '') + '</transpose>');
+      }
       lines.push('      </attributes>');
       if (o.bpm) {
         lines.push('      <direction placement="above"><direction-type><metronome><beat-unit>quarter</beat-unit>' +

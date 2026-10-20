@@ -1,7 +1,7 @@
 import { PitchDetector, freqToMidi } from '../js/pitch.js';
 import { NoteSegmenter } from '../js/segmenter.js';
 import { quantize, parseTimeSig, durationInfo } from '../js/notation.js';
-import { detectKey, keyByName, vexKey, fullName } from '../js/theory.js';
+import { detectKey, keyByName, vexKey, fullName, transposeKey, instrumentById } from '../js/theory.js';
 import { toMusicXML } from '../js/musicxml.js';
 
 const sr = 48000;
@@ -90,5 +90,26 @@ check(vexKey(70, keyByName('F')) === 'bb/4' && vexKey(70, keyByName('C')) === 'a
 // 5. MusicXML well-formed-ish
 const xml = toMusicXML(measures, { key: keyByName('C'), clef: 'treble', timeSig: parseTimeSig('4/4'), bpm });
 check(xml.includes('<tie type="start"/>') && xml.includes('<tied type="stop"/>') && (xml.match(/<measure /g) || []).length === 2, 'musicxml ties + measures');
+// 6. Transposing instruments
+const alto = instrumentById('alto'), tenor = instrumentById('tenor'), bari = instrumentById('bari');
+check(transposeKey(keyByName('C'), alto.semis).name === 'A', 'C concert -> A for alto sax');
+check(transposeKey(keyByName('Eb'), alto.semis).name === 'C', 'Eb concert -> C for alto sax');
+check(transposeKey(keyByName('G'), tenor.semis).name === 'A', 'G concert -> A for tenor sax');
+check(transposeKey(keyByName('Am'), bari.semis).name === 'F#m', 'A minor concert -> F# minor for bari sax');
+check(transposeKey(keyByName('F'), 0) === keyByName('F'), 'no transposition keeps the key');
+check(transposeKey(keyByName('Bb'), instrumentById('horn').semis).name === 'F', 'Bb concert -> F for horn');
+{
+  const o = { key: keyByName('A'), clef: 'treble', timeSig: parseTimeSig('4/4'), bpm, instrument: alto, octaveShift: 0 };
+  const x = toMusicXML(measures, o);
+  check(x.includes('<transpose><diatonic>-5</diatonic><chromatic>-9</chromatic></transpose>'), 'alto sax <transpose> -5/-9');
+  check(x.includes('<part-name>E♭ alto sax</part-name>'), 'part named after the instrument');
+  const xb = toMusicXML(measures, { ...o, instrument: bari });
+  check(xb.includes('<transpose><diatonic>-5</diatonic><chromatic>-9</chromatic><octave-change>-1</octave-change></transpose>'), 'bari sax adds octave-change -1');
+  const xt = toMusicXML(measures, { ...o, instrument: tenor, octaveShift: 1 });
+  check(xt.includes('<diatonic>-1</diatonic><chromatic>-2</chromatic><octave-change>-2</octave-change>'), 'tenor + octave up: -1/-2, octave-change -2');
+  const xc = toMusicXML(measures, { ...o, instrument: instrumentById('concert'), octaveShift: 0 });
+  check(!xc.includes('<transpose>') && xc.includes('<part-name>Melody</part-name>'), 'concert pitch has no <transpose>');
+}
+
 console.log(fails ? `\n${fails} FAILURES` : '\nall passed');
 process.exit(fails ? 1 : 0);

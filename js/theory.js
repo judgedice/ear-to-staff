@@ -35,6 +35,36 @@ export const KEYS = [
   { name: 'Ebm', fifths: -6, mode: 'minor' },
 ];
 
+/**
+ * Transposing instruments. `semis` is how far the written part sits ABOVE
+ * concert pitch (E-flat alto sax: a major sixth, 9 semitones). `diatonic` is
+ * the same interval in scale steps, for MusicXML's <transpose>. `written` is
+ * the comfortable written range in MIDI, used only for warnings.
+ */
+export const INSTRUMENTS = [
+  { id: 'concert', label: 'Concert pitch (as it sounds)', semis: 0, diatonic: 0, clef: null, written: null },
+  { id: 'alto', label: 'E♭ alto sax', semis: 9, diatonic: 5, clef: 'treble', written: [58, 90] },
+  { id: 'bari', label: 'E♭ baritone sax', semis: 21, diatonic: 12, clef: 'treble', written: [58, 90] },
+  { id: 'tenor', label: 'B♭ tenor sax', semis: 14, diatonic: 8, clef: 'treble', written: [58, 90] },
+  { id: 'soprano', label: 'B♭ soprano sax', semis: 2, diatonic: 1, clef: 'treble', written: [58, 90] },
+  { id: 'trumpet', label: 'B♭ trumpet / clarinet', semis: 2, diatonic: 1, clef: 'treble', written: [52, 94] },
+  { id: 'horn', label: 'F horn', semis: 7, diatonic: 4, clef: 'treble', written: [53, 89] },
+];
+
+export function instrumentById(id) {
+  return INSTRUMENTS.find((i) => i.id === id) ?? INSTRUMENTS[0];
+}
+
+/** The key signature a part written `semis` above concert pitch needs. */
+export function transposeKey(key, semis) {
+  const n = ((semis % 12) + 12) % 12;
+  if (n === 0) return key;
+  const table = key.mode === 'minor' ? MINOR_BY_PC : MAJOR_BY_PC;
+  const pc = table.indexOf(key.name);
+  if (pc < 0) return key;
+  return keyByName(table[(pc + n) % 12]);
+}
+
 export function keyByName(name) {
   return KEYS.find((k) => k.name === name) ?? KEYS[0];
 }

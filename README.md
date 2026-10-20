@@ -35,6 +35,12 @@ Then open <http://localhost:5173>.
 - Streaming only? Use **Browser tab audio**. Works in Chrome and Edge; Safari cannot share tab audio.
 - Vinyl or tape? Record through an audio interface with QuickTime Player and drop the file in.
 
+## Writing for saxophone (or any transposing instrument)
+
+Transcribe the guitar line, vocal, or solo as usual, then set **Write for** to **E♭ alto sax**, **E♭ baritone sax**, **B♭ tenor sax**, **B♭ soprano sax**, **B♭ trumpet / clarinet**, or **F horn**. The score, the MusicXML export, and saved takes switch to the written part: every note moves up by the instrument's interval and the key signature moves with it, so a line that sounds in G comes out in E for alto and A for tenor. The **Key** setting always means the concert key, and the score caption shows both. Playback keeps sounding at concert pitch, so you can still check it against the record.
+
+Guitar lines often sit low for a sax. Use **Octave** to move the written part up or down; the caption warns when notes fall outside the instrument's normal written range. The MusicXML carries a `<transpose>` element, so notation software knows the part is transposed and can show the concert score too.
+
 ## History
 
 Every take you want to keep can be saved as a small JSON record in [`transcriptions/`](transcriptions/). A record holds the title, the source file name, when it was made, every setting that shaped the score, the detected notes (start, end, MIDI, cents), and the exported MusicXML. Audio is never stored, so the public repository never contains the recording.
@@ -61,7 +67,7 @@ node scripts/build-index.mjs
 | Pitch (whistle) | `js/whistle.js`, `js/fft.js` | Spectral peaks ranked by lobe energy, a harmonic-series test that rejects overtones of lower notes (siblings at f ± f/h matched within 40 cents), narrowness and continuity scoring |
 | Offline analysis | `js/analysis.js` | Frame detection, then a level prior relative to the loudest pitched material, then segmentation. The two stages are separate so re-segmenting is instant. |
 | Segmentation | `js/segmenter.js` | Onset after ~45 ms of stable pitch, offset after ~80 ms of silence, new note only when pitch leaves the note's centre by more than the vibrato tolerance, re-trigger on level jumps |
-| Theory | `js/theory.js` | Note spelling by key, Krumhansl-Schmuckler key detection |
+| Theory | `js/theory.js` | Note spelling by key, Krumhansl-Schmuckler key detection, transposing-instrument table and key transposition |
 | Notation | `js/notation.js` | Swing-aware quantization to an 8th or 16th grid, bar offset, rests, ties across barlines, VexFlow rendering |
 | Export | `js/musicxml.js` | MusicXML 4.0 |
 | History | `js/history.js`, `scripts/build-index.mjs` | Record format, index merging, GitHub Contents API client; Action keeps the index current |

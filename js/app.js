@@ -1,6 +1,6 @@
 import { freqToMidi, midiToFreq } from './pitch.js';
 import { NoteSegmenter } from './segmenter.js';
-import { KEYS, keyByName, detectKey, fullName } from './theory.js';
+import { KEYS, keyByName, detectKey, fullName, INSTRUMENTS, instrumentById, transposeKey } from './theory.js';
 import { quantize, renderScore, autoClef, parseTimeSig, ticksToSeconds, secondsToTicks } from './notation.js';
 import { toMusicXML } from './musicxml.js';
 import { detectFrames, segmentTrace, effectiveClarity, makeDetector, segmenterOptions } from './analysis.js';
@@ -12,7 +12,7 @@ const ui = {
   play: $('btnPlay'), rewind: $('btnRewind'), playhead: $('playhead'), playheadFill: $('playheadFill'), playPos: $('playPos'), playSource: $('playSource'),
   liveName: $('liveName'), liveFreq: $('liveFreq'), liveCents: $('liveCents'), needle: $('tunerNeedle'),
   level: $('levelBar'), gateMark: $('gateMark'), status: $('status'),
-  bpm: $('bpm'), tap: $('btnTap'), timeSig: $('timeSig'), swing: $('swing'), grid: $('grid'), key: $('key'), clef: $('clef'), a4: $('a4'),
+  bpm: $('bpm'), tap: $('btnTap'), timeSig: $('timeSig'), swing: $('swing'), grid: $('grid'), key: $('key'), clef: $('clef'), a4: $('a4'), instrument: $('instrument'), octaveShift: $('octaveShift'),
   offsetBeats: $('offsetBeats'), offsetMinus: $('offsetMinus'), offsetPlus: $('offsetPlus'),
   metronome: $('metronome'), metronomeSilent: $('metronomeSilent'), beats: document.querySelector('.beats'), beatDots: $('beatDots'), beatLabel: $('beatLabel'),
   micDevice: $('micDevice'), micGain: $('micGain'), micGainVal: $('micGainVal'), micProcessing: $('micProcessing'),
@@ -53,6 +53,12 @@ const RANGE_PRESETS = {
     opt.value = k.name;
     opt.textContent = k.mode === 'minor' ? `${k.name.slice(0, -1)} minor` : `${k.name} major`;
     ui.key.appendChild(opt);
+  }
+  for (const inst of INSTRUMENTS) {
+    const opt = document.createElement('option');
+    opt.value = inst.id;
+    opt.textContent = inst.label;
+    ui.instrument.appendChild(opt);
   }
   for (let m = 21; m <= 108; m++) {
     for (const sel of [ui.rangeLow, ui.rangeHigh]) {
@@ -141,9 +147,13 @@ function settings() {
   const grid = parseInt(ui.grid.value, 10);
   const swing = parseFloat(ui.swing.value) || 0.5;
   const keySel = ui.key.value;
-  const key = keySel === 'auto' ? detectKey(state.notes) : keyByName(keySel);
+  const concertKey = keySel === 'auto' ? detectKey(state.notes) : keyByName(keySel);
+  const instrument = instrumentById(ui.instrument.value);
+  const octaveShift = clamp(parseInt(ui.octaveShift.value, 10) || 0, -2, 2);
+  const transpose = instrument.semis + octaveShift * 12;   // written = sounding + transpose
+  const key = transposeKey(concertKey, transpose);
   const clefSel = ui.clef.value;
-  const clef = clefSel === 'auto' ? autoClef(state.notes) : clefSel;
+  const clef = clefSel === 'auto' ? (instrument.clef || autoClef(writtenNotes(state.notes, transpose))) : clefSel;
   const a4 = clamp(parseFloat(ui.a4.value) || 440, 400, 480);
   const gateDb = parseFloat(ui.sensitivity.value);
   const clarity = parseInt(ui.clarity.value, 10) / 100;
@@ -155,7 +165,7 @@ function settings() {
   let highMidi = parseInt(ui.rangeHigh.value, 10);
   if (lowMidi > highMidi) [lowMidi, highMidi] = [highMidi, lowMidi];
   return {
-    bpm, timeSig, grid, swing, key, clef, a4, beatSec, barSec, clarity, changeCents, lowMidi, highMidi, offsetBeats,
+    bpm, timeSig, grid, swing, key, concertKey, instrument, octaveShift, transpose, clef, a4, beatSec, barSec, clarity, changeCents, lowMidi, highMidi, offsetBeats,
     method: ui.method.value,
     t0: -offsetBeats * beatSec,
     gateRms: Math.pow(10, gateDb / 20),
@@ -164,6 +174,19 @@ function settings() {
 }
 
 function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
+
+/** Notes as the player reads them: concert pitch shifted up by the part's transposition. */
+function writtenNotes(notes, transpose) {
+  if (!transpose) return notes;
+  return notes.map((n) => ({ ...n, midi: n.midi + transpose }));
+}
+
+/** How many written notes fall outside the instrument's comfortable range. */
+function outOfRangeCount(notes, s) {
+  const r = s.instrument.written;
+  if (!r) return 0;
+  return notes.reduce((c, n) => c + (n.midi + s.transpose < r[0] || n.midi + s.transpose > r[1] ? 1 : 0), 0);
+}
 
 function setStatus(msg, isError = false) {
   ui.status.innerHTML = msg;
@@ -411,7 +434,7 @@ function updateLiveDisplay(midi, freq, clarity, rms, s) {
   if (voiced) {
     const rounded = Math.round(midi);
     const cents = Math.round((midi - rounded) * 100);
-    const name = fullName(rounded, s.key);
+    const name = fullName(rounded, s.concertKey);
     const m = name.match(/^([A-G][#b]?)(-?\d+)$/);
     ui.liveName.innerHTML = m ? `${m[1]}<sub>${m[2]}</sub>` : name;
     ui.liveFreq.textContent = `${freq.toFixed(1)} Hz · clarity ${(clarity * 100).toFixed(0)}%`;
@@ -876,13 +899,22 @@ function render(force) {
   const notes = currentNotesForRender();
   state.lastRender = state.audioCtx ? state.audioCtx.currentTime : performance.now() / 1000;
 
-  state.measures = quantize(notes, s);
+  state.measures = quantize(writtenNotes(notes, s.transpose), s);
   if (notes.length === 0) {
     ui.scoreInfo.textContent = 'No notes yet';
   } else {
     const bars = state.measures.length;
-    const keyLabel = s.key.mode === 'minor' ? `${s.key.name.slice(0, -1)} minor` : `${s.key.name} major`;
-    ui.scoreInfo.textContent = `${state.notes.length} notes · ${bars} bar${bars === 1 ? '' : 's'} · ${keyLabel} · ${s.clef} clef`;
+    const label = (k) => (k.mode === 'minor' ? `${k.name.slice(0, -1)} minor` : `${k.name} major`);
+    const parts = [`${state.notes.length} notes`, `${bars} bar${bars === 1 ? '' : 's'}`];
+    if (s.transpose) {
+      parts.push(`sounds in ${label(s.concertKey)}`, `written in ${label(s.key)} for ${s.instrument.label}${s.octaveShift ? ` (${s.octaveShift > 0 ? '+' : ''}${s.octaveShift} oct)` : ''}`);
+      const out = outOfRangeCount(state.notes, s);
+      if (out) parts.push(`⚠ ${out} note${out === 1 ? '' : 's'} outside the instrument's range – try the Octave setting`);
+    } else {
+      parts.push(label(s.key));
+    }
+    parts.push(`${s.clef} clef`);
+    ui.scoreInfo.textContent = parts.join(' · ');
   }
   try {
     renderScore(ui.score, state.measures, s);
@@ -1063,7 +1095,7 @@ function seekTo(tick) {
 
 function exportMusicXML() {
   const s = settings();
-  const measures = quantize(state.notes, s);
+  const measures = quantize(writtenNotes(state.notes, s.transpose), s);
   const xml = toMusicXML(measures, { ...s, title: state.audioName ? `Transcription of ${state.audioName}` : 'Transcription' });
   const blob = new Blob([xml], { type: 'application/vnd.recordare.musicxml+xml' });
   const a = document.createElement('a');
@@ -1094,6 +1126,8 @@ function settingsSnapshot() {
     grid: parseInt(ui.grid.value, 10),
     key: ui.key.value,
     clef: ui.clef.value,
+    instrument: ui.instrument.value,
+    octaveShift: parseInt(ui.octaveShift.value, 10) || 0,
     a4: parseFloat(ui.a4.value) || 440,
     offsetBeats: parseFloat(ui.offsetBeats.value) || 0,
     method: ui.method.value,
@@ -1110,7 +1144,7 @@ function settingsSnapshot() {
 function applySettingsSnapshot(sn) {
   const setIf = (el, v) => { if (v !== undefined && v !== null) el.value = String(v); };
   setIf(ui.bpm, sn.bpm); setIf(ui.timeSig, sn.timeSig); setIf(ui.swing, sn.swing); setIf(ui.grid, sn.grid);
-  setIf(ui.key, sn.key); setIf(ui.clef, sn.clef); setIf(ui.a4, sn.a4); setIf(ui.offsetBeats, sn.offsetBeats);
+  setIf(ui.key, sn.key); setIf(ui.clef, sn.clef); setIf(ui.instrument, sn.instrument); setIf(ui.octaveShift, sn.octaveShift); setIf(ui.a4, sn.a4); setIf(ui.offsetBeats, sn.offsetBeats);
   setIf(ui.method, sn.method); setIf(ui.rangeLow, sn.rangeLow); setIf(ui.rangeHigh, sn.rangeHigh);
   setIf(ui.sensitivity, sn.gateDb); setIf(ui.clarity, sn.clarity); setIf(ui.vibrato, sn.vibrato);
   const match = Object.entries(RANGE_PRESETS).find(([, [a, b]]) => a === sn.rangeLow && b === sn.rangeHigh);
@@ -1121,7 +1155,7 @@ function applySettingsSnapshot(sn) {
 
 function currentRecord() {
   const s = settings();
-  const measures = quantize(state.notes, s);
+  const measures = quantize(writtenNotes(state.notes, s.transpose), s);
   const musicxml = toMusicXML(measures, { ...s, title: ui.takeTitle.value.trim() || state.audioName || 'Transcription' });
   return buildRecord({
     title: ui.takeTitle.value || state.audioName || '',
@@ -1383,7 +1417,7 @@ ui.trace.addEventListener('click', (e) => {
 
 // Rhythm / notation settings
 ui.tap.addEventListener('click', tapTempo);
-for (const el of [ui.bpm, ui.timeSig, ui.swing, ui.grid, ui.key, ui.clef, ui.a4, ui.offsetBeats]) {
+for (const el of [ui.bpm, ui.timeSig, ui.swing, ui.grid, ui.key, ui.clef, ui.a4, ui.offsetBeats, ui.instrument, ui.octaveShift]) {
   el.addEventListener('change', refreshFromSettings);
 }
 ui.timeSig.addEventListener('change', () => showBeat(null, state.listening ? 'Free time' : 'Metronome off'));
