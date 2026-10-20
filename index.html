@@ -19,7 +19,15 @@
       <button id="btnListen">● Start listening</button>
       <button id="btnClear">Clear</button>
       <button id="btnExport" disabled>Export MusicXML</button>
-      <button id="btnPrint" disabled>Print / PDF</button>
+      <div class="menu-wrap">
+        <button id="btnPrint" disabled aria-haspopup="true" aria-expanded="false">Print / PDF ▾</button>
+        <div id="printMenu" class="menu" hidden>
+          <button data-print="current">This part</button>
+          <button data-print="with-concert">This part + concert score</button>
+          <button data-print="saxes">Concert + alto, tenor, bari parts</button>
+          <small>Each part prints on its own page with a title block. Choose "Save as PDF" in the print dialog for a file.</small>
+        </div>
+      </div>
     </div>
   </header>
 
@@ -335,6 +343,8 @@
       </ul>
     </section>
   </main>
+
+  <section id="printSheet" class="print-sheet" aria-hidden="true"></section>
 
   <script type="module" src="js/app.js"></script>
 </body>

@@ -179,7 +179,7 @@ export function renderScore(container, measures, o) {
   const VF = window.Vex.Flow;
   container.innerHTML = '';
 
-  const width = Math.max(320, container.clientWidth - 16);
+  const width = Math.max(320, (o.width || container.clientWidth) - 16);
   const firstExtra = 90;                          // room for clef + key + time
   const baseMeasureWidth = 230;
   const perLine = Math.max(1, Math.floor((width - firstExtra) / baseMeasureWidth));

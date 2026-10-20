@@ -39,6 +39,8 @@ Then open <http://localhost:5173>.
 
 Transcribe the guitar line, vocal, or solo as usual, then set **Write for** to **E♭ alto sax**, **E♭ baritone sax**, **B♭ tenor sax**, **B♭ soprano sax**, **B♭ trumpet / clarinet**, or **F horn**. The score, the MusicXML export, and saved takes switch to the written part: every note moves up by the instrument's interval and the key signature moves with it, so a line that sounds in G comes out in E for alto and A for tenor. The **Key** setting always means the concert key, and the score caption shows both. Playback keeps sounding at concert pitch, so you can still check it against the record.
 
+**Print / PDF** opens a small menu: print this part, this part plus the concert score, or the concert score with alto, tenor, and baritone parts in one go. Each part lands on its own page with the title, instrument, tempo, meter, and both keys at the top. Pick "Save as PDF" in the print dialog to get a file.
+
 Guitar lines often sit low for a sax. Use **Octave** to move the written part up or down; the caption warns when notes fall outside the instrument's normal written range. The MusicXML carries a `<transpose>` element, so notation software knows the part is transposed and can show the concert score too.
 
 ## History

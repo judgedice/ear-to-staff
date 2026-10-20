@@ -8,7 +8,7 @@ import { buildRecord, validateRecord, slugFor, repoFromLocation, GitHubSaver, IN
 
 const $ = (id) => document.getElementById(id);
 const ui = {
-  listen: $('btnListen'), openFile: $('btnOpenFile'), chooseFile: $('btnChooseFile'), clear: $('btnClear'), export: $('btnExport'), print: $('btnPrint'),
+  listen: $('btnListen'), openFile: $('btnOpenFile'), chooseFile: $('btnChooseFile'), clear: $('btnClear'), export: $('btnExport'), print: $('btnPrint'), printMenu: $('printMenu'), printSheet: $('printSheet'),
   play: $('btnPlay'), rewind: $('btnRewind'), playhead: $('playhead'), playheadFill: $('playheadFill'), playPos: $('playPos'), playSource: $('playSource'),
   liveName: $('liveName'), liveFreq: $('liveFreq'), liveCents: $('liveCents'), needle: $('tunerNeedle'),
   level: $('levelBar'), gateMark: $('gateMark'), status: $('status'),
@@ -141,15 +141,16 @@ const playback = {
   wasPlayingBeforeDrag: false,
 };
 
-function settings() {
+/** Current settings from the UI. `over` can replace instrument/octaveShift (used for printing other parts). */
+function settings(over = {}) {
   const bpm = clamp(parseFloat(ui.bpm.value) || 90, 30, 240);
   const timeSig = parseTimeSig(ui.timeSig.value);
   const grid = parseInt(ui.grid.value, 10);
   const swing = parseFloat(ui.swing.value) || 0.5;
   const keySel = ui.key.value;
   const concertKey = keySel === 'auto' ? detectKey(state.notes) : keyByName(keySel);
-  const instrument = instrumentById(ui.instrument.value);
-  const octaveShift = clamp(parseInt(ui.octaveShift.value, 10) || 0, -2, 2);
+  const instrument = instrumentById(over.instrument ?? ui.instrument.value);
+  const octaveShift = clamp(parseInt(over.octaveShift ?? ui.octaveShift.value, 10) || 0, -2, 2);
   const transpose = instrument.semis + octaveShift * 12;   // written = sounding + transpose
   const key = transposeKey(concertKey, transpose);
   const clefSel = ui.clef.value;
@@ -1313,6 +1314,72 @@ function initGitHubSettings() {
   });
 }
 
+// ---------------------------------------------------------------- Printing
+
+const SWING_LABELS = { 0.5: 'straight', 0.58: 'light swing', 0.6667: 'triplet swing' };
+
+/** Which parts to print for a menu choice: a list of { instrument, octaveShift }. */
+function printPlan(scope) {
+  const cur = { instrument: ui.instrument.value, octaveShift: parseInt(ui.octaveShift.value, 10) || 0 };
+  const concert = { instrument: 'concert', octaveShift: 0 };
+  if (scope === 'with-concert') return cur.instrument === 'concert' ? [cur] : [cur, concert];
+  if (scope === 'saxes') return [concert, { instrument: 'alto', octaveShift: cur.octaveShift }, { instrument: 'tenor', octaveShift: cur.octaveShift }, { instrument: 'bari', octaveShift: cur.octaveShift }];
+  return [cur];
+}
+
+/** Fill the print sheet with one page per part. Returns the parts rendered. */
+function buildPrintSheet(scope) {
+  const title = ui.takeTitle.value.trim() || (state.audioName ? `Transcription of ${state.audioName}` : 'Transcription');
+  const label = (k) => (k.mode === 'minor' ? `${k.name.slice(0, -1)} minor` : `${k.name} major`);
+  ui.printSheet.innerHTML = '';
+  const parts = printPlan(scope);
+  for (const part of parts) {
+    const s = settings(part);
+    const measures = quantize(writtenNotes(state.notes, s.transpose), s);
+    const sec = document.createElement('section');
+    sec.className = 'print-part';
+    const h1 = document.createElement('h1'); h1.textContent = title;
+    const h2 = document.createElement('h2');
+    h2.textContent = s.transpose
+      ? `${s.instrument.label}${s.octaveShift ? ` (written ${s.octaveShift > 0 ? 'up' : 'down'} ${Math.abs(s.octaveShift)} octave${Math.abs(s.octaveShift) === 1 ? '' : 's'})` : ''}`
+      : 'Concert pitch';
+    const meta = document.createElement('p'); meta.className = 'print-meta';
+    const bits = [`♩ = ${s.bpm}`, `${s.timeSig.beats}/${s.timeSig.beatValue}`, SWING_LABELS[s.swing] || 'swing'];
+    bits.push(s.transpose ? `${label(s.key)} (sounds in ${label(s.concertKey)})` : label(s.key));
+    const out = outOfRangeCount(state.notes, s);
+    if (out) bits.push(`${out} note${out === 1 ? '' : 's'} outside the usual range`);
+    meta.textContent = bits.join(' · ');
+    const score = document.createElement('div'); score.className = 'print-score';
+    sec.append(h1, h2, meta, score);
+    ui.printSheet.appendChild(sec);
+    renderScore(score, measures, { ...s, width: 760 });
+  }
+  return parts;
+}
+
+function printParts(scope) {
+  if (!state.notes.length) return;
+  closePrintMenu();
+  buildPrintSheet(scope);
+  const oldTitle = document.title;
+  document.title = ui.takeTitle.value.trim() || state.audioName || 'Ear to Staff transcription';
+  const cleanup = () => { document.title = oldTitle; ui.printSheet.innerHTML = ''; window.removeEventListener('afterprint', cleanup); };
+  window.addEventListener('afterprint', cleanup);
+  // Give the browser one frame to lay out the sheet before the dialog snapshots it.
+  requestAnimationFrame(() => requestAnimationFrame(() => window.print()));
+}
+
+function closePrintMenu() {
+  ui.printMenu.hidden = true;
+  ui.print.setAttribute('aria-expanded', 'false');
+}
+
+function togglePrintMenu() {
+  const open = ui.printMenu.hidden;
+  ui.printMenu.hidden = !open;
+  ui.print.setAttribute('aria-expanded', String(open));
+}
+
 // ---------------------------------------------------------------- Wiring
 
 ui.sourceTabs.forEach((b) => b.addEventListener('click', () => setSource(b.dataset.source)));
@@ -1357,7 +1424,14 @@ ui.clear.addEventListener('click', () => {
   render(true);
 });
 ui.export.addEventListener('click', exportMusicXML);
-ui.print.addEventListener('click', () => window.print());
+ui.print.addEventListener('click', (e) => { e.stopPropagation(); togglePrintMenu(); });
+ui.printMenu.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const scope = e.target.closest('[data-print]')?.dataset.print;
+  if (scope) printParts(scope);
+});
+document.addEventListener('click', () => { if (!ui.printMenu.hidden) closePrintMenu(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !ui.printMenu.hidden) closePrintMenu(); });
 ui.saveLocal.addEventListener('click', downloadRecord);
 ui.saveGitHub.addEventListener('click', saveToGitHub);
 ui.refreshHistory.addEventListener('click', loadHistoryIndex);
@@ -1493,7 +1567,7 @@ window.__earToStaff = {
     render(true);
   },
   async loadBuffer(buf, name = 'synthetic') { setAudioBuffer(buf, name); await runAnalysis(); },
-  currentRecord, loadRecord, saveToGitHub, loadHistoryIndex,
+  currentRecord, loadRecord, saveToGitHub, loadHistoryIndex, buildPrintSheet, printParts,
 };
 
 updateSettingLabels();
