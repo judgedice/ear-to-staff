@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ear to Staff — live music transcription</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.3/build/cjs/vexflow.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">♪</span>
+      <h1>Ear to Staff</h1>
+      <span class="tagline">Sing, play, or load a record. Watch it become notation.</span>
+    </div>
+    <div class="actions">
+      <button id="btnOpenFile" class="primary">📁 Open audio file…</button>
+      <button id="btnListen">● Start listening</button>
+      <button id="btnClear">Clear</button>
+      <button id="btnExport" disabled>Export MusicXML</button>
+      <button id="btnPrint" disabled>Print / PDF</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="panel source">
+      <div class="source-tabs" role="tablist">
+        <button data-source="file" class="active" role="tab">📁 Audio file</button>
+        <button data-source="tab" role="tab">🖥 Browser tab audio</button>
+        <button data-source="mic" role="tab">🎤 Microphone</button>
+      </div>
+
+      <div id="sourceMic" class="source-body" hidden>
+        <p class="hint">Live transcription from your microphone. Press <b>Start listening</b>.</p>
+      </div>
+
+      <div id="sourceFile" class="source-body">
+        <div id="dropZone" class="dropzone">
+          <input id="fileInput" type="file" accept="audio/*,.mp3,.m4a,.wav,.flac,.ogg,.aac" />
+          <button id="btnChooseFile" type="button" class="choose">Choose audio file…</button>
+          <div>or drop one here</div>
+          <div id="fileName" class="muted">MP3, M4A, WAV, FLAC, OGG, AAC</div>
+        </div>
+        <div class="grid2">
+          <div class="field">
+            <label for="fromSec">Analyze from</label>
+            <div class="inline"><input id="fromSec" type="number" min="0" step="0.1" value="0" /><span class="unit">s</span></div>
+          </div>
+          <div class="field">
+            <label for="toSec">to</label>
+            <div class="inline"><input id="toSec" type="number" min="0" step="0.1" value="0" /><span class="unit">s</span></div>
+          </div>
+        </div>
+        <div id="progressWrap" class="progress" hidden><div id="progressBar"></div></div>
+        <details class="help">
+          <summary>Where do I get the audio file?</summary>
+          <ul>
+            <li><b>Own the CD?</b> Insert it and import it with the Music app (File → Import, or it offers to import automatically).</li>
+            <li><b>Buy a download.</b> The iTunes Store, Amazon Music, Qobuz, and 7digital sell DRM-free files you can drop here.</li>
+            <li><b>Only have streaming?</b> Switch to <b>Browser tab audio</b>, play the song in another tab, and capture it directly. Nothing is saved to disk.</li>
+            <li><b>Have it on vinyl or tape?</b> Record it through an audio interface with QuickTime Player (File → New Audio Recording) and drop the result here.</li>
+          </ul>
+        </details>
+      </div>
+
+      <div id="sourceTab" class="source-body" hidden>
+        <p class="hint">Play the song in another browser tab, then press <b>Start capture</b> and choose that tab. Tick <b>Share tab audio</b> in the picker. The audio is analyzed in memory and never written to disk.</p>
+        <p class="hint muted">Works in Chrome and Edge on this Mac. Safari cannot share tab audio.</p>
+        <div id="captureStatus" class="muted"></div>
+      </div>
+    </section>
+
+    <section class="panel live">
+      <div class="live-note">
+        <div id="liveName" class="note-name">—</div>
+        <div id="liveFreq" class="note-freq">Waiting for input…</div>
+      </div>
+      <div class="tuner">
+        <div class="tuner-scale">
+          <span>−50</span><span>0</span><span>+50</span>
+        </div>
+        <div class="tuner-track">
+          <div class="tuner-center"></div>
+          <div id="tunerNeedle" class="tuner-needle"></div>
+        </div>
+        <div id="liveCents" class="tuner-cents">cents</div>
+      </div>
+      <div class="meter">
+        <label>Level</label>
+        <div class="meter-track">
+          <div id="levelBar" class="meter-bar"></div>
+          <div id="gateMark" class="meter-gate" title="Noise gate"></div>
+        </div>
+      </div>
+      <div class="beats">
+        <div id="beatDots" class="beat-dots" aria-hidden="true"></div>
+        <div id="beatLabel" class="beat-label">Metronome off</div>
+      </div>
+      <div id="status" class="status">Press <b>Start listening</b> and allow microphone access.</div>
+    </section>
+
+    <section class="panel settings">
+      <fieldset>
+        <legend>Rhythm &amp; notation</legend>
+        <div class="grid2">
+          <div class="field">
+            <label for="bpm">Tempo</label>
+            <div class="inline">
+              <input id="bpm" type="number" min="30" max="240" step="1" value="90" />
+              <span class="unit">BPM</span>
+            </div>
+          </div>
+          <div class="field">
+            <label>&nbsp;</label>
+            <button id="btnTap" class="tap" title="Tap along with the beat">Tap tempo</button>
+          </div>
+          <div class="field">
+            <label for="timeSig">Time</label>
+            <select id="timeSig">
+              <option value="4/4" selected>4/4</option>
+              <option value="3/4">3/4</option>
+              <option value="2/4">2/4</option>
+              <option value="6/8">6/8</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="swing">Feel</label>
+            <select id="swing">
+              <option value="0.5" selected>Straight</option>
+              <option value="0.58">Light swing</option>
+              <option value="0.6667">Triplet swing</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="grid">Smallest note</label>
+            <select id="grid">
+              <option value="8">Eighth</option>
+              <option value="16" selected>Sixteenth</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="offsetBeats">Bar 1 offset</label>
+            <div class="inline nudge">
+              <button id="offsetMinus" title="Move the first note earlier in the bar">−</button>
+              <input id="offsetBeats" type="number" min="0" max="11.75" step="0.25" value="0" />
+              <button id="offsetPlus" title="Move the first note later in the bar">+</button>
+              <span class="unit">beats</span>
+            </div>
+          </div>
+          <div class="field">
+            <label for="key">Key</label>
+            <select id="key"></select>
+          </div>
+          <div class="field">
+            <label for="clef">Clef</label>
+            <select id="clef">
+              <option value="auto" selected>Auto</option>
+              <option value="treble">Treble</option>
+              <option value="bass">Bass</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="a4">A4 reference</label>
+            <div class="inline">
+              <input id="a4" type="number" min="415" max="466" step="1" value="440" />
+              <span class="unit">Hz</span>
+            </div>
+          </div>
+          <div class="field checkbox span2">
+            <label><input id="metronome" type="checkbox" /> Metronome with one-bar count-in (microphone only)</label>
+          </div>
+          <div class="field checkbox span2">
+            <label><input id="metronomeSilent" type="checkbox" /> Visual only, no click sound</label>
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Detection</legend>
+        <div class="grid2">
+          <div class="field span2">
+            <label for="method">Method</label>
+            <select id="method">
+              <option value="mpm" selected>Autocorrelation — solo voice or instrument</option>
+              <option value="whistle">Spectral peak — whistling inside a mix</option>
+            </select>
+          </div>
+          <div class="field span2">
+            <label for="rangePreset">Pitch range</label>
+            <select id="rangePreset">
+              <option value="full" selected>Full (A1 – C8)</option>
+              <option value="whistle">Whistle (A5 – C8)</option>
+              <option value="voice">Voice (E2 – C6)</option>
+              <option value="guitar">Guitar (E2 – E6)</option>
+              <option value="bass">Bass guitar (E1 – G4)</option>
+              <option value="violin">Violin (G3 – E7)</option>
+              <option value="cello">Cello (C2 – A5)</option>
+              <option value="flute">Flute (C4 – C7)</option>
+              <option value="piano">Piano (A0 – C8)</option>
+              <option value="custom">Custom</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="rangeLow">Lowest note</label>
+            <select id="rangeLow"></select>
+          </div>
+          <div class="field">
+            <label for="rangeHigh">Highest note</label>
+            <select id="rangeHigh"></select>
+          </div>
+          <div class="field span2">
+            <label for="sensitivity">Noise gate <span id="sensitivityVal" class="val">−45 dB</span></label>
+            <input id="sensitivity" type="range" min="-80" max="-20" step="1" value="-45" />
+            <small>Sounds quieter than this are ignored.</small>
+          </div>
+          <div class="field span2">
+            <label for="clarity">Pitch clarity <span id="clarityVal" class="val">85%</span></label>
+            <input id="clarity" type="range" min="30" max="98" step="1" value="85" />
+            <small>How sure the detector must be. Lower it if whistled notes are missing, raise it if guitar leaks in.</small>
+          </div>
+          <div class="field span2">
+            <label for="vibrato">Vibrato tolerance <span id="vibratoVal" class="val">60 cents</span></label>
+            <input id="vibrato" type="range" min="30" max="120" step="5" value="60" />
+            <small>Pitch wobble smaller than this stays one note. Whistlers often need 80 or more.</small>
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Microphone</legend>
+        <div class="grid2">
+          <div class="field span2">
+            <label for="micDevice">Input device</label>
+            <select id="micDevice"><option value="">Default microphone</option></select>
+          </div>
+          <div class="field span2">
+            <label for="micGain">Input gain <span id="micGainVal" class="val">×1.0</span></label>
+            <input id="micGain" type="range" min="0.25" max="8" step="0.25" value="1" />
+          </div>
+          <div class="field checkbox span2">
+            <label><input id="micProcessing" type="checkbox" /> Browser noise suppression &amp; echo cancellation</label>
+          </div>
+        </div>
+      </fieldset>
+    </section>
+
+    <section class="panel score-panel">
+      <div class="score-head">
+        <h2>Transcription</h2>
+        <div id="scoreInfo" class="score-info">No notes yet</div>
+      </div>
+      <div class="transport">
+        <button id="btnRewind" title="Back to start" disabled>⏮</button>
+        <button id="btnPlay" title="Play / pause" disabled>▶</button>
+        <div class="transport-bar">
+          <input id="playhead" type="range" min="0" max="16" step="1" value="0" disabled aria-label="Playback position" />
+          <div id="playheadFill" class="transport-fill"></div>
+        </div>
+        <div id="playPos" class="transport-time">Bar 1 · beat 1</div>
+        <select id="playSource" title="What to play" hidden>
+          <option value="synth">Synth</option>
+          <option value="original" selected>Original</option>
+          <option value="both">Both</option>
+        </select>
+      </div>
+      <div id="traceWrap" class="trace-wrap" hidden>
+        <div class="trace-head">
+          <span>Pitch trace</span>
+          <span class="muted">teal = accepted frames · grey = rejected · gold = notes · click to seek</span>
+        </div>
+        <div class="trace-canvas-wrap">
+          <canvas id="trace" height="150"></canvas>
+          <div id="traceCursor" class="trace-cursor"></div>
+        </div>
+      </div>
+      <div id="score" class="score"></div>
+    </section>
+
+    <section class="panel tips">
+      <h3>Transcribing whistling from a record</h3>
+      <ul>
+        <li>Load the file or capture the tab, then pick <b>Spectral peak</b> and the <b>Whistle</b> range. The analysis re-runs when you change detection settings.</li>
+        <li>Set <b>Analyze from / to</b> around the whistled passage so the first note is a whistled one.</li>
+        <li><b>Tap tempo</b> along with the record, choose a swing feel, and use <b>Bar 1 offset</b> to put the first note on the right beat.</li>
+        <li>Watch the pitch trace. If grey dots follow the melody, lower pitch clarity. If gold notes fragment, raise vibrato tolerance.</li>
+        <li>Play <b>Original</b> or <b>Both</b> in the transport to hear the record against the transcription.</li>
+      </ul>
+    </section>
+  </main>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
