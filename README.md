@@ -2,7 +2,13 @@
 
 A browser app that turns a melody into standard music notation. It can listen to your microphone, analyze an audio file, or capture the audio of another browser tab. It was built to pull a whistled line out of a full-band recording, and it still works as a live transcriber for a solo voice or instrument. No build step, no server-side code, no accounts.
 
-## Run it
+## Try it
+
+**Live app:** <https://judgedice.github.io/ear-to-staff/>
+
+No install needed. Microphone and tab capture work there because GitHub Pages serves over HTTPS.
+
+## Run it locally
 
 Microphone and tab capture require `localhost` or HTTPS, so serve the folder rather than opening `index.html` directly:
 
