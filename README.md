@@ -35,6 +35,23 @@ Then open <http://localhost:5173>.
 - Streaming only? Use **Browser tab audio**. Works in Chrome and Edge; Safari cannot share tab audio.
 - Vinyl or tape? Record through an audio interface with QuickTime Player and drop the file in.
 
+## History
+
+Every take you want to keep can be saved as a small JSON record in [`transcriptions/`](transcriptions/). A record holds the title, the source file name, when it was made, every setting that shaped the score, the detected notes (start, end, MIDI, cents), and the exported MusicXML. Audio is never stored, so the public repository never contains the recording.
+
+The **History** panel in the app lists the saved takes from `transcriptions/index.json`. Click one to restore its notes and settings. Dropping a record's `.json` file onto the app does the same.
+
+Two ways to save:
+
+- **Download JSON** saves the record to your computer. Commit it into `transcriptions/` and push.
+- **Save to GitHub** commits it straight from the browser through the GitHub Contents API. Open **GitHub settings** in the panel and paste a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new) that is limited to this repository with **Contents: Read and write**. The token stays in your browser's local storage and is only ever sent to `api.github.com`. Use **Forget token** to remove it.
+
+A GitHub Action rebuilds `transcriptions/index.json` whenever a record is pushed, so hand-committed files show up too. The same script runs locally:
+
+```bash
+node scripts/build-index.mjs
+```
+
 ## How it works
 
 | Stage | File | What it does |
@@ -47,12 +64,14 @@ Then open <http://localhost:5173>.
 | Theory | `js/theory.js` | Note spelling by key, Krumhansl-Schmuckler key detection |
 | Notation | `js/notation.js` | Swing-aware quantization to an 8th or 16th grid, bar offset, rests, ties across barlines, VexFlow rendering |
 | Export | `js/musicxml.js` | MusicXML 4.0 |
+| History | `js/history.js`, `scripts/build-index.mjs` | Record format, index merging, GitHub Contents API client; Action keeps the index current |
 
 ## Tests
 
 ```bash
 node test/run.mjs
 node test/whistle.mjs
+node test/history.mjs
 ```
 
 The second file includes an end-to-end check that a synthetic record (guitar intro, whistled melody with vibrato, sung line) yields exactly the whistled notes.

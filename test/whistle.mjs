@@ -5,6 +5,9 @@ import { ticksToSeconds, secondsToTicks, quantize, parseTimeSig } from '../js/no
 import { fullName } from '../js/theory.js';
 
 let fails = 0;
+// Deterministic noise so the end-to-end checks cannot flake between runs.
+let seed = 0x9e3779b9;
+function rand() { seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }
 function check(cond, msg) { if (!cond) { fails++; console.log('FAIL', msg); } else console.log('ok  ', msg); }
 
 // 1. FFT vs naive DFT
@@ -43,7 +46,7 @@ function mix(whistleHz, t0, { n = 2048, whistleAmp = 0.1, vocal = false } = {}) 
       phase += (2 * Math.PI * whistleHz * vib) / sr;
       v += whistleAmp * Math.sin(phase);
     }
-    v += (Math.random() - 0.5) * 0.01;
+    v += (rand() - 0.5) * 0.01;
     buf[i] = v;
   }
   return buf;
@@ -97,7 +100,7 @@ function mix(whistleHz, t0, { n = 2048, whistleAmp = 0.1, vocal = false } = {}) 
         v += 0.12 * env * Math.sin(phase);
       }
     }
-    v += (Math.random() - 0.5) * 0.01;
+    v += (rand() - 0.5) * 0.01;
     data[i] = v * 0.6;
   }
   const fakeBuffer = { sampleRate: sr, length: len, duration: dur, numberOfChannels: 1, getChannelData: () => data };

@@ -4,6 +4,7 @@ import { KEYS, keyByName, detectKey, fullName } from './theory.js';
 import { quantize, renderScore, autoClef, parseTimeSig, ticksToSeconds, secondsToTicks } from './notation.js';
 import { toMusicXML } from './musicxml.js';
 import { detectFrames, segmentTrace, effectiveClarity, makeDetector, segmenterOptions } from './analysis.js';
+import { buildRecord, validateRecord, slugFor, repoFromLocation, GitHubSaver, INDEX_FILE } from './history.js';
 
 const $ = (id) => document.getElementById(id);
 const ui = {
@@ -24,6 +25,9 @@ const ui = {
   progressWrap: $('progressWrap'), progressBar: $('progressBar'), captureStatus: $('captureStatus'),
   traceWrap: $('traceWrap'), trace: $('trace'), traceCursor: $('traceCursor'),
   score: $('score'), scoreInfo: $('scoreInfo'),
+  takeTitle: $('takeTitle'), saveLocal: $('btnSaveLocal'), saveGitHub: $('btnSaveGitHub'), historyStatus: $('historyStatus'),
+  refreshHistory: $('btnRefreshHistory'), historyList: $('historyList'), ghRepo: $('ghRepo'), ghToken: $('ghToken'), forgetToken: $('btnForgetToken'),
+  githubSettings: $('githubSettings'),
 };
 
 const RANGE_PRESETS = {
@@ -396,6 +400,7 @@ function addNote(n) {
 
 function setHasNotes(has) {
   ui.play.disabled = ui.rewind.disabled = ui.playhead.disabled = ui.export.disabled = ui.print.disabled = !has;
+  ui.saveLocal.disabled = ui.saveGitHub.disabled = !has;
 }
 
 function updateLiveDisplay(midi, freq, clarity, rms, s) {
@@ -548,6 +553,11 @@ function tapTempo() {
 
 async function loadFile(file) {
   if (!file) return;
+  if (/\.json$/i.test(file.name) || file.type === 'application/json') {
+    try { loadRecord(JSON.parse(await file.text()), file.name); }
+    catch (err) { setStatus(`Could not read that JSON file: ${err.message}`, true); }
+    return;
+  }
   try {
     const ctx = ensureAudioContext();
     setStatus(`Decoding ${file.name}…`);
@@ -1067,6 +1077,208 @@ function exportMusicXML() {
   setStatus('MusicXML downloaded. Open it in MuseScore, Finale, Sibelius, or Dorico.');
 }
 
+// ---------------------------------------------------------------- History
+
+const DEFAULT_REPO = 'judgedice/ear-to-staff';
+const LS_TOKEN = 'earToStaff.githubToken';
+const LS_REPO = 'earToStaff.githubRepo';
+let historyEntries = [];
+let activeHistoryFile = null;
+
+/** Every UI setting that shapes the score or the detection, as plain values. */
+function settingsSnapshot() {
+  return {
+    bpm: parseFloat(ui.bpm.value) || 90,
+    timeSig: ui.timeSig.value,
+    swing: parseFloat(ui.swing.value) || 0.5,
+    grid: parseInt(ui.grid.value, 10),
+    key: ui.key.value,
+    clef: ui.clef.value,
+    a4: parseFloat(ui.a4.value) || 440,
+    offsetBeats: parseFloat(ui.offsetBeats.value) || 0,
+    method: ui.method.value,
+    rangeLow: parseInt(ui.rangeLow.value, 10),
+    rangeHigh: parseInt(ui.rangeHigh.value, 10),
+    gateDb: parseFloat(ui.sensitivity.value),
+    clarity: parseInt(ui.clarity.value, 10),
+    vibrato: parseInt(ui.vibrato.value, 10),
+    from: parseFloat(ui.fromSec.value) || 0,
+    to: parseFloat(ui.toSec.value) || 0,
+  };
+}
+
+function applySettingsSnapshot(sn) {
+  const setIf = (el, v) => { if (v !== undefined && v !== null) el.value = String(v); };
+  setIf(ui.bpm, sn.bpm); setIf(ui.timeSig, sn.timeSig); setIf(ui.swing, sn.swing); setIf(ui.grid, sn.grid);
+  setIf(ui.key, sn.key); setIf(ui.clef, sn.clef); setIf(ui.a4, sn.a4); setIf(ui.offsetBeats, sn.offsetBeats);
+  setIf(ui.method, sn.method); setIf(ui.rangeLow, sn.rangeLow); setIf(ui.rangeHigh, sn.rangeHigh);
+  setIf(ui.sensitivity, sn.gateDb); setIf(ui.clarity, sn.clarity); setIf(ui.vibrato, sn.vibrato);
+  const match = Object.entries(RANGE_PRESETS).find(([, [a, b]]) => a === sn.rangeLow && b === sn.rangeHigh);
+  ui.rangePreset.value = match ? match[0] : 'custom';
+  updateSettingLabels();
+  applyDetectionSettings();
+}
+
+function currentRecord() {
+  const s = settings();
+  const measures = quantize(state.notes, s);
+  const musicxml = toMusicXML(measures, { ...s, title: ui.takeTitle.value.trim() || state.audioName || 'Transcription' });
+  return buildRecord({
+    title: ui.takeTitle.value || state.audioName || '',
+    source: state.audioName || (state.source === 'mic' ? 'microphone' : ''),
+    settings: settingsSnapshot(),
+    notes: state.notes,
+    musicxml,
+    bars: measures.length,
+  });
+}
+
+function downloadRecord() {
+  if (!state.notes.length) return;
+  const record = currentRecord();
+  const blob = new Blob([JSON.stringify(record, null, 2) + '\n'], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = slugFor(record);
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  historyNote(`Downloaded ${a.download}. Put it in transcriptions/ and push; the index rebuilds itself.`);
+}
+
+function historyNote(msg, isError = false) {
+  ui.historyStatus.textContent = msg;
+  ui.historyStatus.style.color = isError ? 'var(--danger)' : '';
+}
+
+function githubConfig() {
+  return { repo: ui.ghRepo.value.trim() || DEFAULT_REPO, token: ui.ghToken.value.trim() };
+}
+
+async function saveToGitHub() {
+  if (!state.notes.length) return;
+  const { repo, token } = githubConfig();
+  if (!token) {
+    ui.githubSettings.open = true;
+    ui.ghToken.focus();
+    historyNote('Paste a GitHub token first (GitHub settings below).', true);
+    return;
+  }
+  ui.saveGitHub.disabled = true;
+  historyNote('Saving to GitHub…');
+  try {
+    const saver = new GitHubSaver({ repo, token });
+    const record = currentRecord();
+    const { file, url } = await saver.saveRecord(record);
+    try { localStorage.setItem(LS_TOKEN, token); localStorage.setItem(LS_REPO, repo); } catch (_) { /* private mode */ }
+    historyNote(`Saved ${file}. It appears on the site after the next Pages build (about a minute).`);
+    ui.historyStatus.innerHTML += ` <a href="${url}" target="_blank" rel="noopener">View on GitHub ↗</a>`;
+    // Show it in the list right away.
+    historyEntries = [{ file, title: record.title, source: record.source, createdAt: record.createdAt, bars: record.bars, noteCount: record.notes.length, bpm: record.settings.bpm, timeSig: record.settings.timeSig, key: record.settings.key, _local: record }, ...historyEntries.filter((e) => e.file !== file)];
+    activeHistoryFile = file;
+    renderHistoryList();
+  } catch (err) {
+    console.error(err);
+    historyNote(err.message, true);
+  } finally {
+    ui.saveGitHub.disabled = !state.notes.length;
+  }
+}
+
+async function loadHistoryIndex() {
+  ui.historyList.innerHTML = '<li class="muted">Loading…</li>';
+  try {
+    const res = await fetch(`${INDEX_FILE}?t=${Date.now()}`, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const list = await res.json();
+    historyEntries = Array.isArray(list) ? list : [];
+  } catch (err) {
+    historyEntries = [];
+    ui.historyList.innerHTML = `<li class="muted">No history index found (${err.message}).</li>`;
+    return;
+  }
+  renderHistoryList();
+}
+
+function renderHistoryList() {
+  if (!historyEntries.length) {
+    ui.historyList.innerHTML = '<li class="muted">No saved takes yet. Transcribe something, give it a title, and save it.</li>';
+    return;
+  }
+  ui.historyList.innerHTML = '';
+  for (const e of historyEntries) {
+    const li = document.createElement('li');
+    li.className = e.file === activeHistoryFile ? 'active' : '';
+    const when = e.createdAt ? new Date(e.createdAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '';
+    const meta = [when, e.bars ? `${e.bars} bars` : '', e.noteCount ? `${e.noteCount} notes` : '', e.bpm ? `${e.bpm} BPM` : '', e.timeSig || '', e.key && e.key !== 'auto' ? e.key : ''].filter(Boolean).join(' · ');
+    li.innerHTML = `<div class="title"></div><div class="meta"></div>`;
+    li.querySelector('.title').textContent = e.title || e.file;
+    li.querySelector('.meta').textContent = meta + (e.source ? ` · from ${e.source}` : '');
+    li.title = 'Load this take';
+    li.addEventListener('click', () => loadHistoryEntry(e));
+    ui.historyList.appendChild(li);
+  }
+}
+
+async function loadHistoryEntry(entry) {
+  try {
+    let record = entry._local;
+    if (!record) {
+      const res = await fetch(`transcriptions/${entry.file}?t=${Date.now()}`, { cache: 'no-store' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      record = await res.json();
+    }
+    loadRecord(record, entry.file);
+  } catch (err) {
+    historyNote(`Could not load ${entry.file}: ${err.message}`, true);
+  }
+}
+
+/** Put a saved take back into the app: notes + settings, no audio. */
+function loadRecord(record, file = null) {
+  const problem = validateRecord(record);
+  if (problem) { historyNote(`That file is not a transcription record (${problem}).`, true); return; }
+  if (state.listening) stopListening();
+  if (state.recorder) cancelCapture();
+  stopPlayback();
+  clearTimeout(state.reanalyzeTimer);
+  state.analysisId++;
+  state.analyzing = false;
+  state.audioBuffer = null;
+  state.audioName = record.source || '';
+  state.fileNotes = [];
+  state.trace = []; state.traceEff = []; state.traceKey = '';
+  ui.traceWrap.hidden = true;
+  ui.playSource.hidden = true;
+  ui.fileName.textContent = 'MP3, M4A, WAV, FLAC, OGG, AAC';
+  applySettingsSnapshot(record.settings || {});
+  state.notes = record.notes.map((n) => ({ start: n.start, end: n.end, midi: n.midi, cents: n.cents ?? 0 }));
+  state.resumeAt = 0;
+  state.anchor = null;
+  ui.takeTitle.value = record.title || '';
+  activeHistoryFile = file;
+  setHasNotes(state.notes.length > 0);
+  updateMainButton();
+  render(true);
+  renderHistoryList();
+  setStatus(`Loaded "${record.title}" from history. Settings restored; the original audio is not stored, so playback uses the synth.`);
+  historyNote('');
+}
+
+function initGitHubSettings() {
+  let repo = '', token = '';
+  try { repo = localStorage.getItem(LS_REPO) || ''; token = localStorage.getItem(LS_TOKEN) || ''; } catch (_) { /* private mode */ }
+  ui.ghRepo.value = repo || repoFromLocation() || DEFAULT_REPO;
+  ui.ghToken.value = token;
+  ui.ghRepo.addEventListener('change', () => { try { localStorage.setItem(LS_REPO, ui.ghRepo.value.trim()); } catch (_) { /* noop */ } });
+  ui.forgetToken.addEventListener('click', () => {
+    ui.ghToken.value = '';
+    try { localStorage.removeItem(LS_TOKEN); } catch (_) { /* noop */ }
+    historyNote('Token forgotten.');
+  });
+}
+
 // ---------------------------------------------------------------- Wiring
 
 ui.sourceTabs.forEach((b) => b.addEventListener('click', () => setSource(b.dataset.source)));
@@ -1112,6 +1324,9 @@ ui.clear.addEventListener('click', () => {
 });
 ui.export.addEventListener('click', exportMusicXML);
 ui.print.addEventListener('click', () => window.print());
+ui.saveLocal.addEventListener('click', downloadRecord);
+ui.saveGitHub.addEventListener('click', saveToGitHub);
+ui.refreshHistory.addEventListener('click', loadHistoryIndex);
 
 // File input + drag/drop
 const openPicker = () => { setSource('file'); ui.fileInput.click(); };
@@ -1244,10 +1459,13 @@ window.__earToStaff = {
     render(true);
   },
   async loadBuffer(buf, name = 'synthetic') { setAudioBuffer(buf, name); await runAnalysis(); },
+  currentRecord, loadRecord, saveToGitHub, loadHistoryIndex,
 };
 
 updateSettingLabels();
 refreshDevices();
 showBeat(null, 'Metronome off');
 setSource('file');
+initGitHubSettings();
+loadHistoryIndex();
 render(true);

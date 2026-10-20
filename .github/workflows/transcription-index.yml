@@ -1,0 +1,33 @@
+name: Build transcription index
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'transcriptions/**'
+      - 'scripts/build-index.mjs'
+      - 'js/history.js'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  index:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node scripts/build-index.mjs
+      - name: Commit index if it changed
+        run: |
+          if git diff --quiet -- transcriptions/index.json && [ -z "$(git status --porcelain transcriptions/index.json)" ]; then
+            echo "index unchanged"; exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add transcriptions/index.json
+          git commit -m "Rebuild transcription index"
+          git push

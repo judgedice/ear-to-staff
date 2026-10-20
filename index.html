@@ -71,6 +71,39 @@
       </div>
     </section>
 
+    <section class="panel history">
+      <div class="history-head">
+        <h3>History</h3>
+        <button id="btnRefreshHistory" title="Reload the list" class="small">↻</button>
+      </div>
+      <div class="field">
+        <label for="takeTitle">Title for this take</label>
+        <input id="takeTitle" type="text" placeholder="Lazy Bones – whistle solo" maxlength="80" />
+      </div>
+      <div class="history-actions">
+        <button id="btnSaveLocal" disabled title="Download this take as a JSON file you can commit to transcriptions/">Download JSON</button>
+        <button id="btnSaveGitHub" disabled title="Commit this take to the repository">Save to GitHub</button>
+      </div>
+      <div id="historyStatus" class="muted"></div>
+      <details class="help" id="githubSettings">
+        <summary>GitHub settings</summary>
+        <div class="field">
+          <label for="ghRepo">Repository</label>
+          <input id="ghRepo" type="text" placeholder="owner/repo" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="field">
+          <label for="ghToken">Fine-grained token with <b>Contents: read and write</b> on that repo</label>
+          <input id="ghToken" type="password" autocomplete="off" placeholder="github_pat_…" />
+        </div>
+        <div class="inline">
+          <button id="btnForgetToken" class="small">Forget token</button>
+          <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Create a token ↗</a>
+        </div>
+        <small>Stored only in this browser's local storage and sent only to api.github.com.</small>
+      </details>
+      <ul id="historyList" class="history-list"><li class="muted">Loading…</li></ul>
+    </section>
+
     <section class="panel live">
       <div class="live-note">
         <div id="liveName" class="note-name">—</div>
